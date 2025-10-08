@@ -1,10 +1,14 @@
-import React, { useState } from 'react';
-import { Play, Info, Check, X } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Play, Info, Check, X, Maximize2, Minimize2 } from 'lucide-react';
 
 const MatroidIntersection = () => {
   const [selectedTest, setSelectedTest] = useState(0);
   const [result, setResult] = useState(null);
   const [showTheory, setShowTheory] = useState(false);
+  const [visualMode, setVisualMode] = useState('2d'); // '2d' or '3d'
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const canvasRef = useRef(null);
+  const animationRef = useRef(null);
 
   // Matroid Independence Tests
   class GraphicMatroid {
@@ -116,7 +120,6 @@ const MatroidIntersection = () => {
           return true;
         }
         
-        // eslint-disable-next-line no-unused-vars
         const otherElem = [...match.entries()].find(([_, s]) => s === setIdx)?.[0];
         if (otherElem !== undefined && elements.has(otherElem)) {
           match.delete(otherElem);
@@ -147,7 +150,6 @@ const MatroidIntersection = () => {
       for (let setIdx = 0; setIdx < this.sets.length; setIdx++) {
         if (this.sets[setIdx].has(e)) {
           if (used.has(setIdx)) {
-            // eslint-disable-next-line no-unused-vars
             const blocker = [...match.entries()].find(([_, s]) => s === setIdx)?.[0];
             if (blocker !== undefined) circuit.add(blocker);
           }
@@ -455,7 +457,8 @@ const MatroidIntersection = () => {
       time: (endTime - startTime).toFixed(2),
       steps: steps,
       edges: Array.from(solution).map(i => test.graphicEdges[i]),
-      isOptimal
+      isOptimal,
+      test: test
     });
   };
 
@@ -477,6 +480,325 @@ const MatroidIntersection = () => {
     }
     
     return { ind1, ind2, maximal };
+  };
+
+  // Graph Visualization Component
+  const GraphVisualization = ({ test, solution, edges }) => {
+    const canvasRef2D = useRef(null);
+    const canvas3DRef = useRef(null);
+    const [rotation, setRotation] = useState({ x: 0, y: 0 });
+    const [isDragging, setIsDragging] = useState(false);
+    const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 });
+
+    // Calculate node positions using force-directed layout
+    const calculatePositions = (n, edges) => {
+      const positions = [];
+      const angle = (2 * Math.PI) / n;
+      const radius = 150;
+      
+      // Circular layout
+      for (let i = 0; i < n; i++) {
+        positions.push({
+          x: Math.cos(angle * i) * radius,
+          y: Math.sin(angle * i) * radius,
+          z: Math.sin(angle * i * 2) * 50 // Add z-coordinate for 3D
+        });
+      }
+      
+      return positions;
+    };
+
+    // 2D Canvas Drawing
+    useEffect(() => {
+      if (!canvasRef2D.current || visualMode !== '2d') return;
+      
+      const canvas = canvasRef2D.current;
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
+      
+      ctx.clearRect(0, 0, width, height);
+      
+      const positions = calculatePositions(test.graphicN, test.graphicEdges);
+      const centerX = width / 2;
+      const centerY = height / 2;
+      
+      // Draw all edges
+      test.graphicEdges.forEach((edge, idx) => {
+        const [u, v] = edge;
+        const isInSolution = solution.includes(idx);
+        
+        ctx.beginPath();
+        ctx.moveTo(centerX + positions[u].x, centerY + positions[u].y);
+        ctx.lineTo(centerX + positions[v].x, centerY + positions[v].y);
+        
+        if (isInSolution) {
+          ctx.strokeStyle = '#4F46E5';
+          ctx.lineWidth = 4;
+        } else {
+          ctx.strokeStyle = '#D1D5DB';
+          ctx.lineWidth = 2;
+        }
+        ctx.stroke();
+        
+        // Draw edge label
+        const midX = centerX + (positions[u].x + positions[v].x) / 2;
+        const midY = centerY + (positions[u].y + positions[v].y) / 2;
+        
+        ctx.fillStyle = isInSolution ? '#4F46E5' : '#9CA3AF';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillText(`e${idx}`, midX + 5, midY - 5);
+      });
+      
+      // Draw nodes
+      positions.forEach((pos, idx) => {
+        ctx.beginPath();
+        ctx.arc(centerX + pos.x, centerY + pos.y, 20, 0, 2 * Math.PI);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fill();
+        ctx.strokeStyle = '#4F46E5';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        ctx.fillStyle = '#1F2937';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(idx.toString(), centerX + pos.x, centerY + pos.y);
+      });
+      
+      // Legend
+      ctx.fillStyle = '#1F2937';
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('Blue edges: In solution', 10, 20);
+      ctx.fillText('Gray edges: Not in solution', 10, 40);
+      
+    }, [test, solution, visualMode]);
+
+    // 3D Canvas Drawing
+    useEffect(() => {
+      if (!canvas3DRef.current || visualMode !== '3d') return;
+      
+      const canvas = canvas3DRef.current;
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
+      
+      const animate = () => {
+        ctx.clearRect(0, 0, width, height);
+        
+        const positions = calculatePositions(test.graphicN, test.graphicEdges);
+        const centerX = width / 2;
+        const centerY = height / 2;
+        
+        // Apply 3D rotation
+        const rotatedPositions = positions.map(pos => {
+          let x = pos.x;
+          let y = pos.y;
+          let z = pos.z;
+          
+          // Rotate around Y axis
+          const cosY = Math.cos(rotation.y);
+          const sinY = Math.sin(rotation.y);
+          const tempX = x * cosY - z * sinY;
+          z = x * sinY + z * cosY;
+          x = tempX;
+          
+          // Rotate around X axis
+          const cosX = Math.cos(rotation.x);
+          const sinX = Math.sin(rotation.x);
+          const tempY = y * cosX - z * sinX;
+          z = y * sinX + z * cosX;
+          y = tempY;
+          
+          // Perspective projection
+          const perspective = 400;
+          const scale = perspective / (perspective + z);
+          
+          return {
+            x: x * scale,
+            y: y * scale,
+            z: z,
+            scale: scale
+          };
+        });
+        
+        // Sort edges by depth for proper rendering
+        const edgesWithDepth = test.graphicEdges.map((edge, idx) => {
+          const [u, v] = edge;
+          const avgZ = (rotatedPositions[u].z + rotatedPositions[v].z) / 2;
+          return { edge, idx, avgZ };
+        });
+        edgesWithDepth.sort((a, b) => a.avgZ - b.avgZ);
+        
+        // Draw edges (back to front)
+        edgesWithDepth.forEach(({ edge, idx }) => {
+          const [u, v] = edge;
+          const isInSolution = solution.includes(idx);
+          
+          ctx.beginPath();
+          ctx.moveTo(centerX + rotatedPositions[u].x, centerY + rotatedPositions[u].y);
+          ctx.lineTo(centerX + rotatedPositions[v].x, centerY + rotatedPositions[v].y);
+          
+          if (isInSolution) {
+            ctx.strokeStyle = '#4F46E5';
+            ctx.lineWidth = 4;
+          } else {
+            ctx.strokeStyle = '#D1D5DB';
+            ctx.lineWidth = 2;
+          }
+          ctx.stroke();
+          
+          // Draw edge label
+          const midX = centerX + (rotatedPositions[u].x + rotatedPositions[v].x) / 2;
+          const midY = centerY + (rotatedPositions[u].y + rotatedPositions[v].y) / 2;
+          
+          ctx.fillStyle = isInSolution ? '#4F46E5' : '#9CA3AF';
+          ctx.font = 'bold 11px sans-serif';
+          ctx.fillText(`e${idx}`, midX + 5, midY - 5);
+        });
+        
+        // Draw nodes (back to front)
+        const nodesWithDepth = rotatedPositions.map((pos, idx) => ({ pos, idx }));
+        nodesWithDepth.sort((a, b) => a.pos.z - b.pos.z);
+        
+        nodesWithDepth.forEach(({ pos, idx }) => {
+          const radius = 20 * pos.scale;
+          
+          ctx.beginPath();
+          ctx.arc(centerX + pos.x, centerY + pos.y, radius, 0, 2 * Math.PI);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fill();
+          ctx.strokeStyle = '#4F46E5';
+          ctx.lineWidth = 3 * pos.scale;
+          ctx.stroke();
+          
+          ctx.fillStyle = '#1F2937';
+          ctx.font = `bold ${14 * pos.scale}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(idx.toString(), centerX + pos.x, centerY + pos.y);
+        });
+        
+        // Instructions
+        ctx.fillStyle = '#1F2937';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Drag to rotate', 10, 20);
+        ctx.fillText('Blue edges: In solution', 10, 40);
+        
+        animationRef.current = requestAnimationFrame(animate);
+      };
+      
+      animate();
+      
+      return () => {
+        if (animationRef.current) {
+          cancelAnimationFrame(animationRef.current);
+        }
+      };
+    }, [test, solution, visualMode, rotation]);
+
+    const handleMouseDown = (e) => {
+      if (visualMode === '3d') {
+        setIsDragging(true);
+        setLastMouse({ x: e.clientX, y: e.clientY });
+      }
+    };
+
+    const handleMouseMove = (e) => {
+      if (isDragging && visualMode === '3d') {
+        const deltaX = e.clientX - lastMouse.x;
+        const deltaY = e.clientY - lastMouse.y;
+        
+        setRotation(prev => ({
+          x: prev.x + deltaY * 0.01,
+          y: prev.y + deltaX * 0.01
+        }));
+        
+        setLastMouse({ x: e.clientX, y: e.clientY });
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    return (
+      <div className="bg-white rounded-lg shadow-lg p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-bold text-gray-800">Graph Visualization</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setVisualMode('2d')}
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+                visualMode === '2d'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              2D View
+            </button>
+            <button
+              onClick={() => setVisualMode('3d')}
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+                visualMode === '3d'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              3D View
+            </button>
+          </div>
+        </div>
+        
+        <div className="relative bg-gray-50 rounded-lg overflow-hidden">
+          {visualMode === '2d' ? (
+            <canvas
+              ref={canvasRef2D}
+              width={800}
+              height={600}
+              className="w-full"
+            />
+          ) : (
+            <canvas
+              ref={canvas3DRef}
+              width={800}
+              height={600}
+              className="w-full cursor-move"
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+            />
+          )}
+        </div>
+        
+        <div className="mt-4 grid grid-cols-2 gap-4">
+          <div className="bg-indigo-50 p-3 rounded-lg">
+            <h3 className="font-semibold text-indigo-900 mb-2">Solution Statistics</h3>
+            <div className="text-sm space-y-1">
+              <div>Vertices: {test.graphicN}</div>
+              <div>Total Edges: {test.graphicEdges.length}</div>
+              <div>Selected Edges: {solution.length}</div>
+              <div>Coverage: {((solution.length / test.graphicEdges.length) * 100).toFixed(1)}%</div>
+            </div>
+          </div>
+          
+          <div className="bg-green-50 p-3 rounded-lg">
+            <h3 className="font-semibold text-green-900 mb-2">Selected Edges</h3>
+            <div className="text-sm">
+              {edges.map((e, i) => (
+                <div key={i} className="text-gray-700">
+                  e{solution[i]}: ({e[0]} → {e[1]})
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -623,7 +945,14 @@ const MatroidIntersection = () => {
       </div>
 
       {result && (
-        <div className="bg-white rounded-lg shadow-lg p-6">
+        <>
+          <GraphVisualization 
+            test={result.test} 
+            solution={result.solution} 
+            edges={result.edges}
+          />
+          
+          <div className="bg-white rounded-lg shadow-lg p-6 mt-6">
           <h2 className="text-xl font-bold text-gray-800 mb-4">Results</h2>
           
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -708,6 +1037,8 @@ const MatroidIntersection = () => {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
 
       <div className="bg-white rounded-lg shadow-lg p-6 mt-6">
