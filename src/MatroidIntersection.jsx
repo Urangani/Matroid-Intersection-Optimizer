@@ -7,8 +7,6 @@ const MatroidIntersection = () => {
   const [showTheory, setShowTheory] = useState(false);
   const [visualMode, setVisualMode] = useState('2d'); // '2d' or '3d'
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const canvasRef = useRef(null);
-  const animationRef = useRef(null);
 
   // Matroid Independence Tests
   class GraphicMatroid {
@@ -486,6 +484,7 @@ const MatroidIntersection = () => {
   const GraphVisualization = ({ test, solution, edges }) => {
     const canvasRef2D = useRef(null);
     const canvas3DRef = useRef(null);
+    const animationRef = useRef(null);
     const [rotation, setRotation] = useState({ x: 0, y: 0 });
     const [isDragging, setIsDragging] = useState(false);
     const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 });
